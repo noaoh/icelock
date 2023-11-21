@@ -4,12 +4,16 @@ export type Icelock = {
     unfreeze: () => void;
 };
 
-export function icelock(obj: any): Icelock {
+export type IcelockOptions = {
+    isFrozen?: boolean;
+}
+
+export function icelock(obj: any, options: IcelockOptions = { isFrozen: true }): Icelock {
     if (obj === null) {
         throw new Error('Cannot freeze null.');
     }
 
-    let isFrozen = true;
+    let isFrozen = options.isFrozen;
 
     const handlers = {
         'object': {
@@ -103,21 +107,73 @@ export function icelock(obj: any): Icelock {
         },
     };
 
-    let iced;
+    let iced: any;
+    let freezes: any[] = [];
+    let unfreezes: any[] = [];
     if (obj instanceof Map) {
-        iced = new Proxy(obj as unknown as Map<any, any>, handlers['map']);
+        const icedMap = Array.from(obj.entries()).reduce((acc: any, [key, value]) => {
+            let icedValue: any;
+            if (value instanceof Map || value instanceof Set || Array.isArray(value) || value instanceof Object) {
+                const { iced, freeze, unfreeze } = icelock(value);
+                icedValue = iced;
+                freezes.push(freeze);
+                unfreezes.push(unfreeze);
+            }
+            acc.set(key, icedValue || value);
+            return acc;
+        }, new Map());
+        iced = new Proxy(icedMap, handlers['map']);
     } else if (Array.isArray(obj)) {
-        iced = new Proxy(obj as unknown as any[], handlers['array']);
+        const icedArray = obj.reduce((acc: any, value: any, index: number) => {
+            let icedValue: any;
+            if (value instanceof Map || value instanceof Set || Array.isArray(value) || value instanceof Object) {
+                const { iced, freeze, unfreeze } = icelock(value);
+                icedValue = iced;
+                freezes.push(freeze);
+                unfreezes.push(unfreeze);
+            }
+            acc[index] = icedValue || value;
+            return acc;
+        }, []);
+        iced = new Proxy(icedArray, handlers['array']);
     } else if (obj instanceof Set) {
-        iced = new Proxy(obj as unknown as Set<any>, handlers['set']);
+        const icedSet = Array.from(obj.values()).reduce((acc: any, value: any) => {
+            let icedValue: any;
+            if (value instanceof Map || value instanceof Set || Array.isArray(value) || value instanceof Object) {
+                const { iced, freeze, unfreeze } = icelock(value);
+                icedValue = iced;
+                freezes.push(freeze);
+                unfreezes.push(unfreeze);
+            }
+            acc.add(icedValue || value);
+            return acc;
+        }, new Set());
+        iced = new Proxy(icedSet, handlers['set']);
     } else if (obj instanceof Object) {
-        iced = new Proxy(obj, handlers['object']);
+        const icedObj: any = Object.entries(obj).reduce((acc: any, [key, value]) => {
+            let icedValue: any;
+            if (value instanceof Map || value instanceof Set || Array.isArray(value) || value instanceof Object) {
+                const { iced, freeze, unfreeze } = icelock(value);
+                icedValue = iced;
+                freezes.push(freeze);
+                unfreezes.push(unfreeze);
+            }
+            acc[key] = icedValue || value;
+            return acc;
+        }, {});
+        iced = new Proxy(icedObj, handlers['object']);
     }
 
     return {
         iced,
-        freeze: () => { isFrozen = true; },
-        unfreeze: () => { isFrozen = false; }
+        freeze: () => { 
+            isFrozen = true; 
+            freezes.forEach(freeze => freeze());
+        },
+        unfreeze: () => { 
+            isFrozen = false;
+            unfreezes.forEach(unfreeze => unfreeze());
+        }
     };
 }
 

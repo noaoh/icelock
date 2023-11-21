@@ -24,7 +24,8 @@ module.exports = {
     },
     "ignorePatterns": [
         "node_modules/",
-        "dist/"
+        "dist/",
+        "coverage/"
     ],
     "settings": {
         "import/resolver": {
